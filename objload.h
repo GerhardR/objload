@@ -13,25 +13,10 @@ struct Model {
     std::vector<float> texCoord; // 2 * N entries
     std::vector<float> normal; // 3 * N entries
     
-    std::vector<int> face; // assume triangels and uniform indexing
+    std::vector<unsigned short> face; // assume triangels and uniform indexing
 };
 
-inline Model loadModel( const std::string & str);
-inline Model loadModelFromString( std::istream & in );
-inline Model loadModelFromFile( std::istream & in );
-
-inline std::ostream & operator<<( std::ostream & out, const Model & m );
-
-template <typename T>
-inline std::istream & operator>>(std::istream & in, std::vector<T> & vec ){
-    T temp;
-    in >> temp;
-    if(in)
-        vec.push_back(temp);
-    return in;
-}
-
-struct Store {
+struct ObjModel {
     struct FaceVertex {
         FaceVertex() : v(-1), t(-1), n(-1) {}
         int v, t, n;
@@ -41,50 +26,34 @@ struct Store {
         }
     };
 
-    typedef std::vector<FaceVertex> Face;
-    typedef std::set<FaceVertex> UniqueVertices;
+    std::vector<float> vertex; // 3 * N entries
+    std::vector<float> texCoord; // 2 * N entries
+    std::vector<float> normal; // 3 * N entries
 
-    Model data;
-    std::vector<Face> faces;
-    
-    void parse( const std::string & line ){
-        std::string op;
-
-        std::istringstream in(line);
-        in >> op;
-
-        if(op == "#")
-            return;
-        else if(op == "v")
-            in >> data.vertex >> data.vertex >> data.vertex;
-        else if(op == "vt")
-            in >> data.texCoord >> data.texCoord >> data.texCoord;
-        else if(op == "vn")
-            in >> data.normal >> data.normal >> data.normal;
-        else if(op == "f") {
-            Face newFace;
-            while(in >> newFace) ;
-            if(newFace.size() == 4) {
-                // cout << "4 face will split\n";
-                newFace.insert(newFace.begin()+3, newFace[0]);
-                newFace.insert(newFace.begin()+4, newFace[2]);
-            } else if(newFace.size() > 4) {
-                std::cout << "Ups long face, cut back to 3\n";
-                newFace.resize(3);
-            }
-            faces.push_back(newFace);
-        }
-    }
-
-    inline Model buildModel() const;
+    std::vector<FaceVertex> face;
+    std::vector<unsigned> face_start;
 };
 
-inline std::ostream & operator<<( std::ostream & out, const Store::FaceVertex & f){
-    out << f.v << "\t" << f.t << "\t" << f.n;
-    return out;
+inline ObjModel parseObjModel( std::istream & in);
+inline Model convertToModel( const ObjModel & obj );
+
+inline Model loadModel( std::istream & in );
+inline Model loadModelFromString( const std::string & in );
+inline Model loadModelFromFile( const std::string & in );
+
+inline std::ostream & operator<<( std::ostream & out, const Model & m );
+inline std::ostream & operator<<( std::ostream & out, const ObjModel::FaceVertex & f);
+
+template <typename T>
+inline std::istream & operator>>(std::istream & in, std::vector<T> & vec ){
+    T temp;
+    in >> temp;
+    if(in) 
+        vec.push_back(temp);
+    return in;
 }
 
-inline std::istream & operator>>( std::istream & in, Store::FaceVertex & f){
+inline std::istream & operator>>( std::istream & in, ObjModel::FaceVertex & f){
     int val;
     if(in >> f.v){
         if(in.good()){
@@ -104,47 +73,65 @@ inline std::istream & operator>>( std::istream & in, Store::FaceVertex & f){
         --f.t;
         --f.n;
     }
-//    cout << f << endl;
+    // std::cout << f << std::endl;
     return in;
 }
 
-Model Store::buildModel() const {
-    UniqueVertices unique;
-    for(std::vector<Face>::const_iterator f = faces.begin(); f != faces.end(); ++f){
-        for(Face::const_iterator ff = f->begin(); ff != f->end(); ++ff)
-            unique.insert(*ff);
+ObjModel parseObjModel( std::istream & in ){
+    char line[1024];
+    std::string op;
+    std::istringstream line_in;
+
+    ObjModel data;
+
+    while(in.good()){
+        in.getline(line, 1023);
+        line_in.clear();
+        line_in.str(line);
+
+        line_in >> op;
+        if(op == "v")
+            line_in >> data.vertex >> data.vertex >> data.vertex;
+        else if(op == "vt")
+            line_in >> data.texCoord >> data.texCoord >> data.texCoord;
+        else if(op == "vn")
+            line_in >> data.normal >> data.normal >> data.normal;
+        else if(op == "f") {
+            data.face_start.push_back(data.face.size());
+            while(line_in >> data.face) ;
+        }
     }
+    return data;
+}
+
+Model convertToModel( const ObjModel & obj ) {
+    // insert all into a set to make unique
+    std::set<ObjModel::FaceVertex> unique(obj.face.begin(), obj.face.end());
+
+    // build a new model with repeated vertices/texcoords/normals to have single indexing
     Model model;
-    for(UniqueVertices::const_iterator f = unique.begin(); f != unique.end(); ++f){
+    for(std::set<ObjModel::FaceVertex>::const_iterator f = unique.begin(); f != unique.end(); ++f){
         // cout << (*f) << endl;
-        model.vertex.insert(model.vertex.end(), data.vertex.begin() + 3*f->v, data.vertex.begin() + 3*f->v + 3);
-        if(!data.texCoord.empty()){
+        model.vertex.insert(model.vertex.end(), obj.vertex.begin() + 3*f->v, obj.vertex.begin() + 3*f->v + 3);
+        if(!obj.texCoord.empty()){
             const int index = (f->t > -1) ? f->t : f->v;
-            model.texCoord.insert(model.texCoord.end(), data.texCoord.begin() + 2*index, data.texCoord.begin() + 2*index + 2);
+            model.texCoord.insert(model.texCoord.end(), obj.texCoord.begin() + 2*index, obj.texCoord.begin() + 2*index + 2);
         }
-        if(!data.normal.empty()){
+        if(!obj.normal.empty()){
             const int index = (f->n > -1) ? f->n : f->v;
-            model.normal.insert(model.normal.end(), data.normal.begin() + 3*index, data.normal.begin() + 3*index + 3);
+            model.normal.insert(model.normal.end(), obj.normal.begin() + 3*index, obj.normal.begin() + 3*index + 3);
         }
     }
-    for(std::vector<Face>::const_iterator f = faces.begin(); f != faces.end(); ++f){
-        for(Face::const_iterator ff = f->begin(); ff != f->end(); ++ff){
-            const int index = std::distance(unique.begin(), unique.find(*ff));
-            model.face.push_back(index);
-        }
+    // look up unique index and transform face descriptions
+    for(std::vector<ObjModel::FaceVertex>::const_iterator f = obj.face.begin(); f != obj.face.end(); ++f){
+        const int index = std::distance(unique.begin(), unique.find(*f));
+        model.face.push_back(index);
     }
     return model;
 }
 
 Model loadModel( std::istream & in ){
-    char line[1024];
-    Store store;
-    
-    while(in.good()){
-        in.getline(line, 1023);
-        store.parse(line);
-    }
-    return store.buildModel();
+    return convertToModel(parseObjModel(in));
 }
 
 Model loadModelFromString( const std::string & str ){
@@ -155,6 +142,11 @@ Model loadModelFromString( const std::string & str ){
 Model loadModelFromFile( const std::string & str) {
     std::ifstream in(str.c_str());
     return loadModel(in);
+}
+
+inline std::ostream & operator<<( std::ostream & out, const ObjModel::FaceVertex & f){
+    out << f.v << "\t" << f.t << "\t" << f.n;
+    return out;
 }
 
 inline std::ostream & operator<<( std::ostream & out, const Model & m ){
