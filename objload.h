@@ -1,12 +1,12 @@
 #ifndef OBJLOAD_H_
 #define OBJLOAD_H_
 
-#include <string>
+#include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <sstream>
-#include <fstream>
+#include <string>
 #include <vector>
-#include <set>
 
 struct Model {
     std::vector<float> vertex; // 3 * N entries
@@ -23,6 +23,10 @@ struct ObjModel {
         
         bool operator<( const FaceVertex & other ) const {
             return (v < other.v) || (v == other.v && t < other.t ) || (v == other.v && t == other.t && n < other.n);
+        }
+        
+        bool operator==( const FaceVertex & other ) const {
+            return (v == other.v && t == other.t && n == other.n);
         }
     };
 
@@ -135,12 +139,13 @@ void tesselateObjModel( ObjModel & obj){
 
 Model convertToModel( const ObjModel & obj ) {
     // insert all into a set to make unique
-    std::set<ObjModel::FaceVertex> unique(obj.face.begin(), obj.face.end());
+    std::vector<ObjModel::FaceVertex> unique(obj.face);
+    std::sort(unique.begin(), unique.end());
+    unique.erase( std::unique(unique.begin(), unique.end()), unique.end());
 
     // build a new model with repeated vertices/texcoords/normals to have single indexing
     Model model;
-    for(std::set<ObjModel::FaceVertex>::const_iterator f = unique.begin(); f != unique.end(); ++f){
-        // cout << (*f) << endl;
+    for(std::vector<ObjModel::FaceVertex>::const_iterator f = unique.begin(); f != unique.end(); ++f){
         model.vertex.insert(model.vertex.end(), obj.vertex.begin() + 3*f->v, obj.vertex.begin() + 3*f->v + 3);
         if(!obj.texCoord.empty()){
             const int index = (f->t > -1) ? f->t : f->v;
@@ -153,7 +158,7 @@ Model convertToModel( const ObjModel & obj ) {
     }
     // look up unique index and transform face descriptions
     for(std::vector<ObjModel::FaceVertex>::const_iterator f = obj.face.begin(); f != obj.face.end(); ++f){
-        const int index = std::distance(unique.begin(), unique.find(*f));
+        const int index = std::distance(unique.begin(), std::lower_bound(unique.begin(), unique.end(), *f));
         model.face.push_back(index);
     }
     return model;
