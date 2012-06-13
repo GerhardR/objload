@@ -47,6 +47,8 @@ inline Model loadModel( std::istream & in );
 inline Model loadModelFromString( const std::string & in );
 inline Model loadModelFromFile( const std::string & in );
 
+// ---------------------------- Implementation starts here -----------------------
+
 inline std::ostream & operator<<( std::ostream & out, const Model & m );
 inline std::ostream & operator<<( std::ostream & out, const ObjModel::FaceVertex & f);
 
@@ -194,35 +196,23 @@ inline std::ostream & operator<<( std::ostream & out, const ObjModel::FaceVertex
 inline std::ostream & operator<<( std::ostream & out, const Model & m ){
     if(!m.vertex.empty()){
         out << "vertex\n";
-        for(int i = 0; i < m.vertex.size(); ++i){
-            out << m.vertex[i] << "\t";
-            if((i % 3) == 2)
-                out << std::endl;
-        }
+        for(int i = 0; i < m.vertex.size(); ++i)
+            out << m.vertex[i] << (((i % 3) == 2)?"\n":"\t");
     }
     if(!m.texCoord.empty()){
         out << "texCoord\n";
-        for(int i = 0; i < m.texCoord.size(); ++i){
-            out << m.texCoord[i] << "\t";
-            if((i % 2) == 1)
-                out << std::endl;
-        }
+        for(int i = 0; i < m.texCoord.size(); ++i)
+            out << m.texCoord[i] << (((i % 2) == 1)?"\n":"\t");
     }
     if(!m.normal.empty()){
         out << "normal\n";
-        for(int i = 0; i < m.normal.size(); ++i){
-            out << m.normal[i] << "\t";
-            if((i % 3) == 2)
-                out << std::endl;
-        }
+        for(int i = 0; i < m.normal.size(); ++i)
+            out << m.normal[i] << (((i % 3) == 2)?"\n":"\t");
     }
     if(!m.face.empty()){
         out << "face\n";
-        for(int i = 0; i < m.face.size(); ++i){
-            out << m.face[i] << "\t";
-            if((i % 3) == 2)
-                out << std::endl;
-        }
+        for(int i = 0; i < m.face.size(); ++i)
+            out << m.face[i] << (((i % 3) == 2)?"\n":"\t");
     }
     return out;
 }
