@@ -1,11 +1,11 @@
 #ifndef OBJLOAD_H_
 #define OBJLOAD_H_
 
-#include <iostream>
-#include <vector>
 #include <string>
+#include <iostream>
 #include <sstream>
 #include <fstream>
+#include <vector>
 #include <set>
 
 struct Model {
@@ -35,6 +35,8 @@ struct ObjModel {
 };
 
 inline ObjModel parseObjModel( std::istream & in);
+inline void tesselateObjModel( ObjModel & obj);
+inline ObjModel tesselateObjModel( const ObjModel & obj );
 inline Model convertToModel( const ObjModel & obj );
 
 inline Model loadModel( std::istream & in );
@@ -101,7 +103,34 @@ ObjModel parseObjModel( std::istream & in ){
             while(line_in >> data.face) ;
         }
     }
+    data.face_start.push_back(data.face.size());
     return data;
+}
+
+void tesselateObjModel( ObjModel & obj){
+    std::vector<ObjModel::FaceVertex> output;
+    std::vector<unsigned> output_start;
+    output.reserve(obj.face.size());
+    output_start.reserve(obj.face_start.size());
+    
+    for(std::vector<unsigned>::const_iterator s = obj.face_start.begin(); s != obj.face_start.end() - 1; ++s){
+        const unsigned size = *(s+1) - *s;
+        if(size > 3){
+            const ObjModel::FaceVertex & start_vertex = obj.face[*s];
+            for( int i = 1; i < size-1; ++i){
+                output_start.push_back(output.size());
+                output.push_back(start_vertex);
+                output.push_back(obj.face[*s+i]);
+                output.push_back(obj.face[*s+i+1]);
+            }
+        } else {
+            output_start.push_back(output.size());
+            output.insert(output.end(), obj.face.begin() + *s, obj.face.begin() + *(s+1));
+        }
+    }
+    output_start.push_back(output.size());
+    obj.face.swap(output);
+    obj.face_start.swap(output_start);
 }
 
 Model convertToModel( const ObjModel & obj ) {
@@ -130,8 +159,16 @@ Model convertToModel( const ObjModel & obj ) {
     return model;
 }
 
+ObjModel tesselateObjModel( const ObjModel & obj ){
+    ObjModel result = obj;
+    tesselateObjModel(result);
+    return result;
+}
+
 Model loadModel( std::istream & in ){
-    return convertToModel(parseObjModel(in));
+    ObjModel model = parseObjModel(in);
+    tesselateObjModel(model);
+    return convertToModel(model);
 }
 
 Model loadModelFromString( const std::string & str ){
