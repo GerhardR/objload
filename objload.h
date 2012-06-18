@@ -29,16 +29,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <map>
+#include <set>
 #include <vector>
 
 namespace obj {
 
 struct Model {
-    std::vector<float> vertex; // 3 * N entries
-    std::vector<float> texCoord; // 2 * N entries
-    std::vector<float> normal; // 3 * N entries
+    std::vector<float> vertex; //< 3 * N entries
+    std::vector<float> texCoord; //< 2 * N entries
+    std::vector<float> normal; //< 3 * N entries
     
-    std::vector<unsigned short> face; // assume triangels and uniform indexing
+    std::map<std::string, std::vector<unsigned short> > faces; //< assume triangels and uniform indexing
 };
 
 struct ObjModel {
@@ -46,21 +48,17 @@ struct ObjModel {
         FaceVertex() : v(-1), t(-1), n(-1) {}
         int v, t, n;
         
-        bool operator<( const FaceVertex & other ) const {
-            return (v < other.v) || (v == other.v && t < other.t ) || (v == other.v && t == other.t && n < other.n);
-        }
-        
-        bool operator==( const FaceVertex & other ) const {
-            return (v == other.v && t == other.t && n == other.n);
-        }
+        bool operator<( const FaceVertex & other ) const;
+        bool operator==( const FaceVertex & other ) const;
     };
+    
+    typedef std::pair<std::vector<FaceVertex>, std::vector<unsigned> > FaceList;
 
-    std::vector<float> vertex; // 3 * N entries
-    std::vector<float> texCoord; // 2 * N entries
-    std::vector<float> normal; // 3 * N entries
+    std::vector<float> vertex; //< 3 * N entries
+    std::vector<float> texCoord; //< 2 * N entries
+    std::vector<float> normal; //< 3 * N entries
 
-    std::vector<FaceVertex> face;
-    std::vector<unsigned> face_start;
+    std::map<std::string, FaceList > faces;
 };
 
 inline ObjModel parseObjModel( std::istream & in);
@@ -72,16 +70,32 @@ inline Model loadModel( std::istream & in );
 inline Model loadModelFromString( const std::string & in );
 inline Model loadModelFromFile( const std::string & in );
 
-// ---------------------------- Implementation starts here -----------------------
-
 inline std::ostream & operator<<( std::ostream & out, const Model & m );
 inline std::ostream & operator<<( std::ostream & out, const ObjModel::FaceVertex & f);
+
+// ---------------------------- Implementation starts here -----------------------
+
+inline bool ObjModel::FaceVertex::operator<( const ObjModel::FaceVertex & other ) const {
+    return (v < other.v) || (v == other.v && t < other.t ) || (v == other.v && t == other.t && n < other.n);
+}
+
+inline bool ObjModel::FaceVertex::operator==( const ObjModel::FaceVertex & other ) const {
+    return (v == other.v && t == other.t && n == other.n);
+}
 
 template <typename T>
 inline std::istream & operator>>(std::istream & in, std::vector<T> & vec ){
     T temp;
     if(in >> temp) 
         vec.push_back(temp);
+    return in;
+}
+
+template <typename T>
+inline std::istream & operator>>(std::istream & in, std::set<T> & vec ){
+    T temp;
+    if(in >> temp) 
+        vec.insert(temp);
     return in;
 }
 
@@ -111,6 +125,8 @@ ObjModel parseObjModel( std::istream & in ){
     char line[1024];
     std::string op;
     std::istringstream line_in;
+    std::set<std::string> groups;
+    groups.insert("default");
 
     ObjModel data;
 
@@ -119,51 +135,73 @@ ObjModel parseObjModel( std::istream & in ){
         line_in.clear();
         line_in.str(line);
 
-        line_in >> op;
+        if(!(line_in >> op))
+            continue;
         if(op == "v")
             line_in >> data.vertex >> data.vertex >> data.vertex;
         else if(op == "vt")
             line_in >> data.texCoord >> data.texCoord >> data.texCoord;
         else if(op == "vn")
             line_in >> data.normal >> data.normal >> data.normal;
+        else if(op == "g"){
+            groups.clear();
+            while(line_in >> groups) ;
+            groups.insert("default");
+        }
         else if(op == "f") {
-            data.face_start.push_back(data.face.size());
-            while(line_in >> data.face) ;
+            std::vector<ObjModel::FaceVertex> list;
+            while(line_in >> list) ;
+            
+            for(std::set<std::string>::const_iterator g = groups.begin(); g != groups.end(); ++g){
+                ObjModel::FaceList & fl = data.faces[*g];
+                fl.second.push_back(fl.first.size());
+                fl.first.insert(fl.first.end(), list.begin(), list.end());
+            }
         }
     }
-    data.face_start.push_back(data.face.size());
+    for(std::map<std::string, ObjModel::FaceList>::iterator g = data.faces.begin(); g != data.faces.end(); ++g){
+        ObjModel::FaceList & fl = g->second;
+        fl.second.push_back(fl.first.size());
+    }
     return data;
 }
 
-void tesselateObjModel( ObjModel & obj){
+inline void tesselateObjModel( std::vector<ObjModel::FaceVertex> & input, std::vector<unsigned> & input_start){
     std::vector<ObjModel::FaceVertex> output;
     std::vector<unsigned> output_start;
-    output.reserve(obj.face.size());
-    output_start.reserve(obj.face_start.size());
+    output.reserve(input.size());
+    output_start.reserve(input_start.size());
     
-    for(std::vector<unsigned>::const_iterator s = obj.face_start.begin(); s != obj.face_start.end() - 1; ++s){
+    for(std::vector<unsigned>::const_iterator s = input_start.begin(); s != input_start.end() - 1; ++s){
         const unsigned size = *(s+1) - *s;
         if(size > 3){
-            const ObjModel::FaceVertex & start_vertex = obj.face[*s];
+            const ObjModel::FaceVertex & start_vertex = input[*s];
             for( int i = 1; i < size-1; ++i){
                 output_start.push_back(output.size());
                 output.push_back(start_vertex);
-                output.push_back(obj.face[*s+i]);
-                output.push_back(obj.face[*s+i+1]);
+                output.push_back(input[*s+i]);
+                output.push_back(input[*s+i+1]);
             }
         } else {
             output_start.push_back(output.size());
-            output.insert(output.end(), obj.face.begin() + *s, obj.face.begin() + *(s+1));
+            output.insert(output.end(), input.begin() + *s, input.begin() + *(s+1));
         }
     }
     output_start.push_back(output.size());
-    obj.face.swap(output);
-    obj.face_start.swap(output_start);
+    input.swap(output);
+    input_start.swap(output_start);
+}
+
+void tesselateObjModel( ObjModel & obj){
+    for(std::map<std::string, ObjModel::FaceList>::iterator g = obj.faces.begin(); g != obj.faces.end(); ++g){
+        ObjModel::FaceList & fl = g->second;
+        tesselateObjModel(fl.first, fl.second);
+    }
 }
 
 Model convertToModel( const ObjModel & obj ) {
-    // insert all into a set to make unique
-    std::vector<ObjModel::FaceVertex> unique(obj.face);
+    // insert all face vertices into a vector and make unique
+    std::vector<ObjModel::FaceVertex> unique(obj.faces.find("default")->second.first);
     std::sort(unique.begin(), unique.end());
     unique.erase( std::unique(unique.begin(), unique.end()), unique.end());
 
@@ -181,9 +219,15 @@ Model convertToModel( const ObjModel & obj ) {
         }
     }
     // look up unique index and transform face descriptions
-    for(std::vector<ObjModel::FaceVertex>::const_iterator f = obj.face.begin(); f != obj.face.end(); ++f){
-        const int index = std::distance(unique.begin(), std::lower_bound(unique.begin(), unique.end(), *f));
-        model.face.push_back(index);
+    for(std::map<std::string, ObjModel::FaceList>::const_iterator g = obj.faces.begin(); g != obj.faces.end(); ++g){
+        const std::string & name = g->first;
+        const ObjModel::FaceList & fl = g->second;
+        std::vector<unsigned short> & v = model.faces[g->first];
+        v.reserve(fl.first.size());
+        for(std::vector<ObjModel::FaceVertex>::const_iterator f = fl.first.begin(); f != fl.first.end(); ++f){
+            const unsigned short index = std::distance(unique.begin(), std::lower_bound(unique.begin(), unique.end(), *f));
+            v.push_back(index);
+        }
     }
     return model;
 }
@@ -215,7 +259,7 @@ inline std::ostream & operator<<( std::ostream & out, const ObjModel::FaceVertex
     return out;
 }
 
-inline std::ostream & operator<<( std::ostream & out, const Model & m ){
+std::ostream & operator<<( std::ostream & out, const Model & m ){
     if(!m.vertex.empty()){
         out << "vertex\n";
         for(int i = 0; i < m.vertex.size(); ++i)
@@ -231,10 +275,14 @@ inline std::ostream & operator<<( std::ostream & out, const Model & m ){
         for(int i = 0; i < m.normal.size(); ++i)
             out << m.normal[i] << (((i % 3) == 2)?"\n":"\t");
     }
-    if(!m.face.empty()){
-        out << "face\n";
-        for(int i = 0; i < m.face.size(); ++i)
-            out << m.face[i] << (((i % 3) == 2)?"\n":"\t");
+    if(!m.faces.empty()){
+        out << "faces\t";
+        for(std::map<std::string, std::vector<unsigned short> >::const_iterator g = m.faces.begin(); g != m.faces.end(); ++g){
+            out << g->first << " ";
+        }
+        out << "\n";
+//        for(int i = 0; i < m.face.size(); ++i)
+//            out << m.face[i] << (((i % 3) == 2)?"\n":"\t");
     }
     return out;
 }
